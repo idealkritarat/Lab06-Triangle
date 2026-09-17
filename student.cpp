@@ -1,29 +1,43 @@
 #include "utils/Student.h"
 
 #include <cstring>
+#include <glm/gtc/matrix_transform.hpp>
 
 const std::vector<Vertex> TRIANGLE = {
-    // TODO(TASK 1a): three vertices. Check values are in Part I of the handout.
+    { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
 };
 
 VkVertexInputBindingDescription Vertex::bindingDescription() {
   VkVertexInputBindingDescription desc{};
   desc.binding = 0;
   desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-  desc.stride =
-      0;  // TODO(TASK 1b): how many bytes from one vertex to the next?
+  desc.stride = 20;
   return desc;
 }
 
 std::vector<VkVertexInputAttributeDescription> Vertex::attributeDescriptions() {
-  // TODO(TASK 1c): two attributes. Each needs binding, location, format and
-  // offset.
-  return {};
+  std::vector<VkVertexInputAttributeDescription> attrs(2);
+
+  attrs[0].binding = 0;
+  attrs[0].location = 0;
+  attrs[0].format = VK_FORMAT_R32G32_SFLOAT;
+  attrs[0].offset = 0;
+
+  attrs[1].binding = 0;
+  attrs[1].location = 1;
+  attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+  attrs[1].offset = 8;
+
+  return attrs;
 }
 
 struct Params {
-  std::uint32_t placeholder[20];  // TODO(TASK 2a): replace with three std140
-                                  // members, padded
+  glm::mat4 mvp;
+  std::uint32_t costLoops;
+  std::uint32_t stripeWidth;
+  std::uint32_t _pad[2];
 };
 
 static_assert(sizeof(Params) == 80,
@@ -32,7 +46,9 @@ static_assert(sizeof(Params) == 80,
 std::vector<std::uint8_t> uniformBlock(std::uint32_t costLoops,
                                        std::uint32_t stripeWidth) {
   Params params{};
-  // TODO(TASK 2b): an identity matrix, and the two knobs passed through.
+  params.mvp = glm::mat4(1.0f);
+  params.costLoops = costLoops;
+  params.stripeWidth = stripeWidth;
 
   std::vector<std::uint8_t> bytes(sizeof(Params));
   std::memcpy(bytes.data(), &params, sizeof(Params));
@@ -41,28 +57,64 @@ std::vector<std::uint8_t> uniformBlock(std::uint32_t costLoops,
 
 PipelineState pipelineState(Variant v) {
   PipelineState s{};
-  // TODO(TASK 3a): match the winding you chose in TASK 1a
-  // TODO(TASK 3b): cull back faces
-  // TODO(TASK 3c): depth compare, using Lab 05's reversed-Z convention
-  // TODO(TASK 3d): should this pipeline write depth?
-  // TODO(TASK 3e): "earlyz_a.frag" or "earlyz_b.frag", chosen from v
-  // TODO(TASK 3f): DrawOrder::FrontToBack or ::BackToFront, chosen from v
+  s.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  s.cullMode = VK_CULL_MODE_BACK_BIT;
+  s.depthCompare = VK_COMPARE_OP_GREATER;
+  s.depthWrite = true;
+
+  switch (v) {
+    case Variant::EarlyZFrontToBack:
+      s.fragShader = "earlyz_a.frag";
+      s.drawOrder = DrawOrder::FrontToBack;
+      break;
+    case Variant::EarlyZBackToFront:
+      s.fragShader = "earlyz_a.frag";
+      s.drawOrder = DrawOrder::BackToFront;
+      break;
+    case Variant::WriteDepthFrontToBack:
+      s.fragShader = "earlyz_b.frag";
+      s.drawOrder = DrawOrder::FrontToBack;
+      break;
+    case Variant::WriteDepthBackToFront:
+      s.fragShader = "earlyz_b.frag";
+      s.drawOrder = DrawOrder::BackToFront;
+      break;
+  }
   return s;
 }
 
 const std::vector<Vertex> QUAD = {
-    // TODO(TASK 4a): four corners. Check values are in Part V of the handout.
+    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { { 0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f, 0.5f }, { 1.0f, 1.0f, 0.0f } },
 };
 
 const std::vector<std::uint16_t> QUAD_INDICES = {
-    // TODO(TASK 4b): six indices, two triangles, both wound like TASK 1a.
+    0, 3, 2,
+    0, 2, 1,
 };
 
 std::vector<glm::mat4> instanceBuffer() {
-  // TODO(TASK 5a): INSTANCES transforms, glm::translate and glm::scale.
-  return {};
+  std::vector<glm::mat4> transforms;
+  transforms.reserve(INSTANCES);
+
+  constexpr std::uint32_t columns = 71;
+  constexpr float step = 2.0f / static_cast<float>(columns);
+
+  for (std::uint32_t i = 0; i < INSTANCES; i++) {
+    std::uint32_t cx = i % columns;
+    std::uint32_t cy = i / columns;
+    float x = -1.0f + step * 0.5f + step * static_cast<float>(cx);
+    float y = -1.0f + step * 0.5f + step * static_cast<float>(cy);
+
+    glm::mat4 m = glm::translate(glm::mat4(1.0f), glm::vec3(x, y, 0.0f));
+    m = glm::scale(m, glm::vec3(step * 0.5f));
+    transforms.push_back(m);
+  }
+  return transforms;
 }
 
 void recordDraw(VkCommandBuffer cmd, std::uint32_t indexCount) {
-  // TODO(TASK 5b): one vkCmdDrawIndexed, with an instance count.
+  vkCmdDrawIndexed(cmd, indexCount, INSTANCES, 0, 0, 0);
 }
